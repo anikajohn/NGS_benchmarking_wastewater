@@ -1,0 +1,17 @@
+variants_pangolin:
+  al: B.1.1.7
+  om5: BA.5
+  om4: BA.4
+  be: B.1.351
+  om2121: BA.2.12.1
+  ka: B.1.617.1
+  om2: BA.2
+  omxbb: XBB
+  de: B.1.617.2
+  om275: BA.2.75
+  ga: P.1
+  om2752: BA.2.75.2
+  om1: BA.1
+  ombq11: BQ.1.1
+
+no_date: True
