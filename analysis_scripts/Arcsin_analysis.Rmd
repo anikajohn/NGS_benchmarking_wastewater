@@ -1,0 +1,417 @@
+---
+title: An R Markdown document converted from "Arcsin_analysis.ipynb"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(boot)
+library(lmtest)
+library(sandwich)
+```
+
+```{r}
+df_raw  <- read_csv('df_regression.csv')
+```
+
+```{r}
+df <- df_raw %>% 
+mutate(assqrt.value = asin(sqrt(value)),
+       assqrt.Omicron_frac_calibrated = asin(sqrt(Omicron_frac_calibrated)))
+```
+
+```{r}
+options(repr.plot.width=8, repr.plot.height=8)
+df %>% 
+filter(variable == 'BA.1') %>% 
+  ggplot() + 
+  geom_point(aes(
+    y=assqrt.value,
+    x=assqrt.Omicron_frac_calibrated
+  ))+ 
+facet_wrap(~sample_class)
+```
+
+```{r}
+options(repr.plot.width=15, repr.plot.height=8)
+df %>% 
+filter(variable == 'BA.1') %>% 
+  ggplot() + 
+  geom_point(aes(
+    y=assqrt.value,
+    x=assqrt.Omicron_frac_calibrated,
+    color=batch
+  )) +
+facet_wrap(~batch)
+```
+
+With arcsine squareroot transformation, see now a more linear relationship for all three batches. There seems to be higher divergence for the initial sample (non-diluted).
+
+## 'Standard' linear model variance with 'sandwich estimator'
+
+### Testing Model assumptions
+
+```{r}
+options(repr.plot.width = 8, repr.plot.height = 8, repr.plot.res = 100)
+
+# df$sample_class  <- factor(df$sample_class, 
+#                               levels=c('MinION','Illumina','Aviti','Flongle'))
+
+#Changing base level
+df$sample_class  <- factor(df$sample_class, 
+                              levels=c('MinION','Illumina','Flongle','Aviti'))
+
+
+lm <- df %>% 
+filter(variable == 'BA.1') %>% 
+lm(assqrt.value ~ assqrt.Omicron_frac_calibrated * sample_class, .)
+
+plot(lm, which = 2)
+plot(lm, which = 3)
+```
+
+```{r}
+options(repr.plot.width = 8, repr.plot.height = 8, repr.plot.res = 100)
+
+# df$sample_class  <- factor(df$sample_class, 
+#                               levels=c('MinION','Illumina','Aviti','Flongle'))
+
+#Changing base level
+df$sample_class  <- factor(df$sample_class, 
+                              levels=c('Illumina','Aviti','MinION','Flongle'))
+
+
+
+lm_filt <- df %>% 
+filter(variable == 'BA.1') %>% 
+filter(Omicron_frac_calibrated < 1) %>%
+lm(assqrt.value ~ assqrt.Omicron_frac_calibrated * sample_class, .)
+
+plot(lm_filt, which = 2)
+plot(lm_filt, which = 3)
+```
+
+```{r}
+bptest(lm_filt)
+```
+
+Heteroskedasticity is gone when the first sample (non-diluted) is removed. Those are 12 samples, which make up ~8% of the total data set. Could be considerd outliers? 
+
+## Model output
+
+```{r}
+summary(lm)
+summary(lm_filt)
+```
+
+Significant levels stay the same between non-filtered and filtered data sets. This indicates that heteroskedasticity does not have a big effect on model. Instead of the intercept parameter, with this transformation the interaction-term (influences slope parameter a) is now significantly affected. Aviti = base model, no significant fifference in slope compared to Illumina, but significantly different to Nanopore technologies. Flongle more than MinION.
+
+```{r}
+coeftest(lm, vcov = vcovHC(lm, type = "HC1")) #H1 has df-correction
+```
+
+In the line above, I add the sandwich estiamtor of error variance to the model. Hence don't assume uniform error distribution anymore. Fit stays the same but incooperate more standard variance in the model. 
+Despite higher standard variance (aka higher p-values) the significance-levels stay the same. Good evidence that we can trust results of model.
+
+## Re-normalisation
+
+```{r}
+df_norm <- df %>% 
+pivot_wider(id_cols = c(location,sample,sample_class,Omicron_frac_calibrated), 
+            names_from = variable,
+            values_from = value ) %>% 
+mutate(BA.1_norm = BA.1/(BA.1 + B.1.617.2),
+       B.1.617.2_norm = B.1.617.2/(BA.1 + B.1.617.2),
+       assqrt.BA.1_norm = asin(sqrt(BA.1_norm)),
+       assqrt.B.1.617.2_norm = asin(sqrt(B.1.617.2_norm)),
+       assqrt.Omicron_frac_calibrated = asin(sqrt(Omicron_frac_calibrated))
+      )
+```
+
+```{r}
+lm_norm <- df_norm %>%
+lm(assqrt.BA.1_norm ~ assqrt.Omicron_frac_calibrated * sample_class, .)
+
+plot(lm_norm, which = 2)
+plot(lm_norm, which = 3)
+
+lm_norm_filt <- df_norm %>%
+filter(Omicron_frac_calibrated < 1) %>%
+lm(assqrt.BA.1_norm ~ assqrt.Omicron_frac_calibrated * sample_class, .)
+
+plot(lm_norm_filt, which = 2)
+plot(lm_norm_filt, which = 3)
+```
+
+```{r}
+bptest(lm_norm)
+bptest(lm_norm_filt)
+```
+
+Heteroskedasticity again caused by sample 1.
+
+```{r}
+summary(lm_norm)
+# summary(lm_norm_filt)
+```
+
+```{r}
+coeftest(lm_norm, vcov = vcovHC(lm_norm, type = "HC1")) #H1 has df-correction
+```
+
+Effect of sequencing technology falls away, when noise is removed.
+
+# Analysis by Time
+
+```{r}
+df_time  <- read_csv('df_deconvs_byTime.csv')
+df_truth  <- read_csv('df_groundTruth.csv')
+```
+
+```{r}
+batch_dic <- list(
+  illumina_31441 = 'batch1',
+  flongle_31583 = 'batch1',
+  minION_31442 = 'batch1',
+  illumina_31519 = 'batch2',
+  flongle_31584 = 'batch2',
+  minION_31520 = 'batch2',
+  illumina_31581 = 'batch3',
+  flongle_31585 = 'batch3',
+  minION_31582 = 'batch3',
+  aviti_31441 = 'batch1',
+  aviti_31519 = 'batch2',
+  aviti_31581 = 'batch3'
+)
+
+df_time <- df_time %>%
+  mutate(batch = as.character(batch_dic[sample]))
+```
+
+```{r}
+df_plot  <- df_time  %>% 
+filter(variable == 'BA.1') %>% 
+left_join(df_truth, by = 'location')
+
+
+df_plot$time  <- factor(df_plot$time, 
+                              levels=c('15h','10h','5h'))
+df_plot  <- df_plot  %>% 
+mutate(sample_class = str_to_sentence(sample_class) %>% 
+      str_replace("Minion", "MinION"),
+      assqrt.value = asin(sqrt(value)),
+       assqrt.Omicron_frac_calibrated = asin(sqrt(Omicron_frac_calibrated)))
+```
+
+```{r}
+#sub-sampled data
+x  <- df_plot[c('variable','value_h','time','sample_class','assqrt.Omicron_frac_calibrated','batch')] %>% 
+rename(value = value_h)
+x <- x  %>% 
+mutate(assqrt.value = asin(sqrt(value))) %>% 
+select(!(value))
+
+#full data
+y  <- df[c('variable','assqrt.value','sample_class','assqrt.Omicron_frac_calibrated','batch')]  %>% 
+filter(sample_class != 'Illumina')%>% 
+filter(sample_class != 'Aviti')%>% 
+filter(variable == 'BA.1') 
+y$time  <- 'max h'
+
+df_plot_all  <- rbind(x,y)
+df_plot_all$time  <- factor(df_plot_all$time, 
+                              levels=c('5h','10h','15h','max h'))
+df_plot_all$sample_class  <- factor(df_plot_all$sample_class, 
+                              levels=c('MinION','Flongle'))
+
+```
+
+```{r}
+options(repr.plot.width = 8, repr.plot.height = 8, repr.plot.res = 100)
+
+lm_time <- df_plot_all %>% 
+lm(assqrt.value ~ assqrt.Omicron_frac_calibrated + sample_class * time, .)
+
+plot(lm_time, which = 2)
+plot(lm_time, which = 3)
+```
+
+```{r}
+bptest(lm_time)
+```
+
+```{r}
+summary(lm_time)
+```
+
+```{r}
+coeftest(lm_time, vcov = vcovHC(lm_time, type = "HC1")) #H1 has df-correction
+```
+
+Time has no effect on sequencing
+
+# Setting Flongle as reference level
+
+### 1. Spike-in
+
+```{r}
+df_flongle  <- df
+df_flongle$sample_class  <- factor(df_flongle$sample_class, 
+                              levels=c('Flongle','Illumina','MinION','Aviti'))
+lm_flongle <- df_flongle %>% 
+filter(variable == 'BA.1') %>% 
+lm(assqrt.value ~ assqrt.Omicron_frac_calibrated * sample_class, .)
+
+summary(lm_flongle)
+coeftest(lm_flongle, vcov = vcovHC(lm_flongle, type = "HC1"))
+```
+
+### 2. re-norm spike-in
+
+```{r}
+#Changing base level
+
+df_norm_flongle  <-  df_norm
+df_norm_flongle$sample_class  <- factor(df_norm_flongle$sample_class, 
+                              levels=c('Flongle','Illumina','MinION','Aviti'))
+
+
+
+lm_norm_flongle <- df_norm_flongle %>%
+lm(assqrt.BA.1_norm ~ assqrt.Omicron_frac_calibrated * sample_class, .)
+
+summary(lm_norm_flongle)
+coeftest(lm_norm_flongle, vcov = vcovHC(lm_norm_flongle, type = "HC1"))
+```
+
+# Plotting Models 
+
+```{r}
+df_plot  <- df %>% 
+filter(variable == 'BA.1') %>% 
+mutate(lm_model = predict(lm, .)) %>% 
+mutate(lm_norm_model = predict(lm_norm, .))
+```
+
+```{r}
+options(repr.plot.width = 21, repr.plot.height = 7, repr.plot.res = 100)
+
+df_plot %>% 
+ggplot() + 
+  geom_point(aes(
+    x=assqrt.Omicron_frac_calibrated,
+    y=assqrt.value,
+    colour = batch),
+    show.legend = TRUE) + 
+scale_x_continuous(
+    name = "arcsine(√Expected BA.1 abundance)"
+    ) + 
+scale_color_manual(values=c("#8c8c8c", "#ffc425", "#d11141"),
+                  labels=c("Batch 1","Batch 2","Batch 3"))+
+# scale_y_continuous(
+#     name = "arcsine(√Estimated BA.1 abundance)"
+#     )+
+ylab(expression(atop("arcsine", paste("(√Estimated BA.1 abundance)"))))+
+geom_line(aes(assqrt.Omicron_frac_calibrated, lm_model),
+         colour = '#0FB859',
+         size=1,
+         alpha = 0.8)+
+theme_bw()+
+theme(text = element_text(size = 26),
+     strip.text = element_text(size=28),
+     axis.title = element_text(size = 29),
+     axis.text = element_text(size = 26),
+     plot.margin = margin(1, 1, 1.5, 1, "cm"),
+     legend.title=element_blank(),
+     legend.position="top",
+     legend.text = element_text(size=26)) +
+facet_grid(~ factor(sample_class,c("Illumina","Aviti", "MinION", "Flongle")),scales = "free")
+#ggsave('../../PublicationFigures_final/SpikeINArcsine.png',width = 21, height = 7)
+
+```
+
+```{r}
+options(repr.plot.width = 21, repr.plot.height = 7, repr.plot.res = 100)
+
+
+df_plot %>% 
+ggplot() + 
+  geom_point(aes(
+    x=assqrt.Omicron_frac_calibrated,
+    y=assqrt.value,
+    colour = batch
+    ),
+    show.legend = TRUE
+            ) + 
+scale_x_continuous(
+    name = "arcsine(√Expected BA.1 abundance)",
+    ) + 
+scale_color_manual(values=c("#8c8c8c", "#ffc425", "#d11141"),
+                  labels=c("Batch 1","Batch 2","Batch 3"))+
+
+# scale_y_continuous(
+#     name = "arcsine(√Estimated BA.1 abundance)",
+#     )+
+ylab(expression(atop("arcsine", paste("(√Estimated BA.1 abundance)"))))+
+geom_line(aes(assqrt.Omicron_frac_calibrated, lm_norm_model),
+         colour = '#0FB859',
+         size=1,
+         alpha = 0.8)+
+theme_bw()+
+theme(text = element_text(size = 26),
+     strip.text = element_text(size=28),
+     axis.title = element_text(size = 29),
+     axis.text = element_text(size = 26),
+     plot.margin = margin(1, 1, 1.5, 1, "cm"),
+     legend.title=element_blank(),
+     legend.position="top",
+     legend.text = element_text(size=26)) +
+facet_grid(~ factor(sample_class,c("Illumina","Aviti", "MinION", "Flongle")),scales = "free")
+```
+
+```{r}
+df_plot_time  <- df_plot_all%>% 
+filter(variable == 'BA.1') %>% 
+mutate(lm_time_model = predict(lm_time, .)) 
+```
+
+```{r}
+options(repr.plot.width = 18, repr.plot.height = 8, repr.plot.res = 100)
+
+df_plot_time %>% 
+ggplot() + 
+  geom_point(aes(
+    x=assqrt.Omicron_frac_calibrated,
+    y=assqrt.value,
+    color = batch
+    ),
+    show.legend = TRUE
+            ) + 
+scale_x_continuous(
+    name = "arcsine(√Expected BA.1 abundance)",
+    ) + 
+scale_color_manual(values=c("#8c8c8c", "#ffc425", "#d11141"),
+                  labels=c("Batch 1","Batch 2","Batch 3"))+
+ylab(expression(atop("arcsine", paste("(√Estimated BA.1 abundance)"))))+
+geom_line(aes(assqrt.Omicron_frac_calibrated, lm_time_model),
+         colour = '#0FB859',
+         size=1.5,
+         alpha = 0.7)+
+theme_bw()+
+theme(text = element_text(size = 22),
+     strip.text = element_text(size=30),
+     axis.title = element_text(size = 30),
+     axis.text = element_text(size = 26),
+     legend.title=element_blank(),
+     legend.position="top",
+     legend.text = element_text(size=24)) +
+facet_grid(factor(sample_class,
+                  levels=c('MinION','Flongle')) ~ 
+           factor(time,levels=c('5h','10h','15h','max h')))
+
+```
+
+```{r}
+sessionInfo()
+```
+
