@@ -229,23 +229,34 @@ df_plot_all$sample_class  <- factor(df_plot_all$sample_class,
 ```{r}
 options(repr.plot.width = 8, repr.plot.height = 8, repr.plot.res = 100)
 
-lm_time <- df_plot_all %>% 
-lm(assqrt.value ~ assqrt.Omicron_frac_calibrated + sample_class * time, .)
+lm_time_minion <- df_plot_all %>% 
+    filter(sample_class != "Flongle") %>%
+    lm(assqrt.value ~ assqrt.Omicron_frac_calibrated * time, .)
 
-plot(lm_time, which = 2)
-plot(lm_time, which = 3)
+plot(lm_time_minion, which = 2)
+plot(lm_time_minion, which = 3)
 ```
 
 ```{r}
-bptest(lm_time)
+bptest(lm_time_minion)
+summary(lm_time_minion)
+coeftest(lm_time_minion, vcov = vcovHC(lm_time, type = "HC1")) #H1 has df-correction
+```
+```{r}
+lm_time_flongle <- df_plot_all %>% 
+    filter(sample_class == "Flongle") %>%
+    lm(assqrt.value ~ assqrt.Omicron_frac_calibrated * time, .)
+
+plot(lm_time_flongle, which = 2)
+plot(lm_time_flongle, which = 3)
+
 ```
 
 ```{r}
-summary(lm_time)
-```
+bptest(lm_time_flongle)
+summary(lm_time_flongle)
+coeftest(lm_time_flongle, vcov = vcovHC(lm_time, type = "HC1")) #H1 has df-correction
 
-```{r}
-coeftest(lm_time, vcov = vcovHC(lm_time, type = "HC1")) #H1 has df-correction
 ```
 
 Time has no effect on sequencing
@@ -370,10 +381,26 @@ facet_grid(~ factor(sample_class,c("Illumina","Aviti", "MinION", "Flongle")),sca
 ```
 
 ```{r}
-df_plot_time  <- df_plot_all%>% 
+df_plot_time  <- df_plot_all %>% 
 filter(variable == 'BA.1') %>% 
 mutate(lm_time_model = predict(lm_time, .)) 
 ```
+
+```{r}
+df_plot_time_MinION <- df_plot_all %>% 
+  filter(sample_class != "Flongle") %>%
+  mutate(lm_time_model = predict(lm_time_minion, .))
+
+df_plot_time_Flongle <- df_plot_all %>% 
+  filter(sample_class == "Flongle") %>%
+  mutate(lm_time_model = predict(lm_time_flongle, .))
+
+df_plot_time <- rbind(df_plot_time_MinION,
+                        df_plot_time_Flongle)
+
+```
+
+
 
 ```{r}
 options(repr.plot.width = 18, repr.plot.height = 8, repr.plot.res = 100)
